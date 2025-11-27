@@ -1,101 +1,83 @@
-import io
-import re
-
-import pdfplumber
+import fitz  # PyMuPDF
 import pandas as pd
-import streamlit as st
+import re
+import math
+from io import BytesIO
 
+CASILLA_INI = 1501
+CASILLA_FIN = 2493
 
-# --- Parámetros del problema ---
-CASILLA_INICIO = 1501
-CASILLA_FIN = 2493  # inclusivo
+NUMERO_EURO = re.compile(r'-?\d{1,3}(?:\.\d{3})*,\d{2}$')
 
-
-def extraer_texto_pdf(pdf_file) -> str:
-    """Devuelve todo el texto del PDF concatenado."""
-    with pdfplumber.open(pdf_file) as pdf:
-        partes = []
-        for page in pdf.pages:
-            t = page.extract_text()
-            if t:
-                partes.append(t)
-    return "\n".join(partes)
-
-
-def buscar_valor_casilla(texto: str, casilla: str) -> str:
+def extraer_casillas(pdf_bytes: bytes,
+                     casilla_ini: int = CASILLA_INI,
+                     casilla_fin: int = CASILLA_FIN,
+                     y_tol: float = 2.5) -> pd.DataFrame:
     """
-    Heurística simple:
-    Busca la casilla (ej. '01501') y coge un bloque numérico después.
-    Esto habrá que ajustarlo con PDFs reales.
+    Devuelve un DataFrame con columnas 'Casilla' y 'Valor'
+    para todas las casillas del rango [casilla_ini, casilla_fin].
+    Si no hay importe visible en el PDF, deja el valor en blanco.
     """
-    # Ejemplos que intenta capturar:
-    # 01501  1.234,56
-    # 01501: 1234,56
-    # Casilla 01501  -123.456,78
-    patron = rf"{casilla}[^\n\r0-9\-+]*([\-+]?\d[\d\.\,]*)"
-    m = re.search(patron, texto)
-    if m:
-        return m.group(1).strip()
-    return ""  # si no encuentra nada, se deja en blanco
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
 
+    casillas_rango = [f"{i:05d}" for i in range(casilla_ini, casilla_fin + 1)]
+    casillas_encontradas: dict[str, str] = {}
 
-def extraer_casillas(pdf_file):
-    """Devuelve un dict {casilla: valor_str} para todo el rango 01501–02493."""
-    texto = extraer_texto_pdf(pdf_file)
-    resultados = {}
-    for n in range(CASILLA_INICIO, CASILLA_FIN + 1):
-        casilla = f"{n:05d}"
-        valor = buscar_valor_casilla(texto, casilla)
-        resultados[casilla] = valor
-    return resultados
+    for page in doc:
+        words = page.get_text("words")  # x0, y0, x1, y1, text, block, line, word
 
+        # Candidatos a importes (tienen coma decimal)
+        valores = []
+        casillas = []
 
-def construir_dataframe(casillas_dict):
-    casillas_ordenadas = sorted(casillas_dict.keys())
-    data = {
-        "Casilla": casillas_ordenadas,
-        "Valor": [casillas_dict[c] for c in casillas_ordenadas],
-    }
-    return pd.DataFrame(data)
+        for x0, y0, x1, y1, texto, *_ in words:
+            t = texto.strip()
 
+            # Importes estilo "17.772,60" o "-1.000,00"
+            if NUMERO_EURO.fullmatch(t):
+                valores.append((x0, y0, x1, y1, t))
+                continue
 
-def df_a_excel_bytes(df: pd.DataFrame) -> bytes:
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        df.to_excel(writer, index=False, sheet_name="Casillas")
-    buffer.seek(0)
-    return buffer.getvalue()
+            # Códigos de casilla de 5 dígitos dentro del rango
+            if re.fullmatch(r'\d{5}', t):
+                n = int(t)
+                if casilla_ini <= n <= casilla_fin:
+                    casillas.append((x0, y0, x1, y1, t))
 
+        if not casillas or not valores:
+            continue
 
-# --- Interfaz Streamlit ---
+        # Ordenamos los importes por coordenada vertical para buscar el más cercano
+        valores.sort(key=lambda w: (w[1] + w[3]) / 2)
 
-st.set_page_config(page_title="Extractor Modelo 200", layout="wide")
+        for x0, y0, x1, y1, cod in casillas:
+            y_c = (y0 + y1) / 2
 
-st.title("Extractor Modelo 200 – Casillas 01501–02493")
+            mejor_valor = None
+            mejor_dist = None
 
-st.write(
-    "Sube un PDF del Modelo 200. "
-    "Se buscarán las casillas de la 01501 a la 02493. "
-    "Si una casilla no aparece o no tiene valor, se deja en blanco."
-)
+            for vx0, vy0, vx1, vy1, vtexto in valores:
+                vy_c = (vy0 + vy1) / 2
+                dy = abs(vy_c - y_c)
+                if dy > y_tol:
+                    continue
 
-uploaded_file = st.file_uploader("Sube el PDF del Modelo 200", type=["pdf"])
+                # Solo miramos importes que están a la derecha de la casilla
+                dx = vx0 - x1
+                if dx < -2:
+                    continue
 
-if uploaded_file is not None:
-    with st.spinner("Procesando PDF..."):
-        casillas_dict = extraer_casillas(uploaded_file)
-        df = construir_dataframe(casillas_dict)
+                dist = math.hypot(dx, dy)
+                if mejor_dist is None or dist < mejor_dist:
+                    mejor_dist = dist
+                    mejor_valor = vtexto
 
-    st.subheader("Vista previa de casillas y valores")
-    st.dataframe(df, use_container_width=True, height=600)
+            if mejor_valor is not None:
+                casillas_encontradas[cod] = mejor_valor
 
-    excel_bytes = df_a_excel_bytes(df)
-
-    st.download_button(
-        label="📥 Descargar Excel",
-        data=excel_bytes,
-        file_name="modelo200_casillas_01501_02493.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-else:
-    st.info("Esperando que subas un PDF…")
+    # Construimos el DataFrame completo 01501–02493, rellenando blancos
+    filas = [
+        {"Casilla": c, "Valor": casillas_encontradas.get(c, "")}
+        for c in casillas_rango
+    ]
+    return pd.DataFrame(filas)
