@@ -13,9 +13,9 @@ import streamlit as st
 # --------------------------------------------
 
 # Rango de casillas que queremos barrer.
-# Como enteros, luego ya los convertimos a "01501", "01502", etc.
-CASILLA_INICIO = 1000    #En el PDF que manejo arranca en la 1501 pero le metemos la 1000 no vaya a ser el demonio....
-CASILLA_FIN = 2600    # En el PDF que manejo solo está hasta la 2493 pero me metemos hasta 2600 para estar preparados para el futuro
+# Como enteros, luego ya los convertimos a "01000", "01001", etc.
+CASILLA_INICIO = 1000    # En el PDF que manejo arranca en la 1501 pero le metemos la 1000 no vaya a ser el demonio...
+CASILLA_FIN = 2600       # En el PDF que manejo solo está hasta la 2493 pero metemos hasta 2600 para estar preparados para el futuro
 
 # Patrón para reconocer importes tipo:
 #   1.234,56   -1.234,56   0,00   12.345.678,90
@@ -30,7 +30,7 @@ PATRON_IMPORTE = re.compile(r"-?\d{1,3}(?:\.\d{3})*,\d{2}$")
 def extraer_casillas(pdf_bytes: bytes, y_tol: float = 2.5) -> pd.DataFrame:
     """
     Lee el PDF con PyMuPDF y devuelve un DataFrame con columnas:
-      - Casilla: "01501", "01502", ...
+      - Casilla: códigos de 5 dígitos entre CASILLA_INICIO y CASILLA_FIN
       - Valor: texto tal cual impreso ("17.772,60", "0,00", "")
 
     pdf_bytes: contenido del PDF en bruto.
@@ -105,7 +105,7 @@ def extraer_casillas(pdf_bytes: bytes, y_tol: float = 2.5) -> pd.DataFrame:
             if mejor_valor is not None:
                 casillas_encontradas[cod] = mejor_valor
 
-    # Construimos la tabla completa 01501–02493,
+    # Construimos la tabla completa CASILLA_INICIO–CASILLA_FIN,
     # rellenando con "" cuando no hay importe.
     casillas_ordenadas = [f"{n:05d}" for n in range(CASILLA_INICIO, CASILLA_FIN + 1)]
 
@@ -173,12 +173,16 @@ def main():
     """
     st.markdown(HIDE_STREAMLIT_STYLE, unsafe_allow_html=True)
 
+    # Texto de rango generado a partir de las constantes, así si lo cambio no se queda viejo
+    rango_texto = f"{CASILLA_INICIO:05d}–{CASILLA_FIN:05d}"
+
     # --- Cabecera limpia ---
     st.markdown(
-        """
+        f"""
         <h1 style="margin-bottom:0.2rem;">Extractor Modelo 200</h1>
         <p style="color:#666; margin-top:0;">
-        Demo interna · Relleno automático de casillas 01000–02600 a partir del PDF del impuesto. Aunque no existan esas casillas las intenta bajar
+        Demo interna · Relleno automático de casillas {rango_texto} a partir del PDF del impuesto.
+        Aunque no existan todas esas casillas en el PDF, las intenta bajar igualmente.
         </p>
         """,
         unsafe_allow_html=True,
@@ -188,14 +192,14 @@ def main():
     with st.sidebar:
         st.markdown("### ¿Qué hace esto?")
         st.write(
-            "- Lee el PDF oficial del Modelo 200.\n"
-            "- Busca los importes de las casillas 01000–02600.\n"
+            f"- Lee el PDF oficial del Modelo 200.\n"
+            f"- Busca los importes de las casillas {rango_texto}.\n"
             "- Genera un Excel listo para copiar/pegar en tu hoja de trabajo."
         )
 
         st.markdown("### Cómo usarlo")
         st.write(
-            "1.Coge cada PDF del Modelo 200 que te paso el cliente (sin proteger).\n"
+            "1. Coge cada PDF del Modelo 200 que te pasa el cliente (sin proteger).\n"
             "2. Súbelo aquí.\n"
             "3. Revisa que las casillas clave tengan el importe correcto.\n"
             "4. Descarga el Excel."
