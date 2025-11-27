@@ -1,46 +1,53 @@
 import re
 import math
+import os
 from io import BytesIO
 
-import fitz  # PyMuPDF (sí, el import es "fitz", porque razones)
+import fitz  # PyMuPDF (sí, el import es "fitz", cosas del marketing)
 import pandas as pd
 import streamlit as st
 
 # --------------------------------------------
-# CONFIGURACIÓN BÁSICA DEL EXPERIMENTO
+# CONFIGURACIÓN BÁSICA DEL INVENTO
 # --------------------------------------------
 
 # Rango de casillas que queremos barrer.
-# Como enteros, luego ya los formateamos a "01501", etc.
+# Como enteros, luego ya los convertimos a "01501", etc.
 CASILLA_INICIO = 1501
 CASILLA_FIN = 2493
 
 # Patrón para reconocer importes tipo:
 #   1.234,56   -1.234,56   0,00   12.345.678,90
-# Si Hacienda cambia el formato, lloramos y lo actualizamos.
+# Si el Modelo 200 cambia de formato algún año, tocará actualizar esto.
 PATRON_IMPORTE = re.compile(r"-?\d{1,3}(?:\.\d{3})*,\d{2}$")
 
+
+# --------------------------------------------
+# EXTRACCIÓN DE CASILLAS DESDE EL PDF
+# --------------------------------------------
 
 def extraer_casillas(pdf_bytes: bytes, y_tol: float = 2.5) -> pd.DataFrame:
     """
     Lee el PDF con PyMuPDF y devuelve un DataFrame con columnas:
       - Casilla: "01501", "01502", ...
-      - Valor: cadena tal cual impresa ("17.772,60", "0,00", "")
+      - Valor: texto tal cual impreso ("17.772,60", "0,00", "")
 
     pdf_bytes: contenido del PDF en bruto.
     y_tol: tolerancia vertical para decidir si casilla e importe están alineados.
+           Si lo subes mucho empezará a emparejar cosas que no tocan.
     """
 
-    # Abrimos el PDF desde bytes. Esto lo vi en StackOverflow:
-    # funciona, así que entra en la categoría "no tocar".
+    # Abrimos el PDF desde bytes.
+    # Esto lo vi en StackOverflow, funciona y por tanto no se discute.
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
 
-    # Aquí guardaremos solo las casillas que SÍ encuentren un importe.
+    # Aquí guardaremos solo las casillas que SÍ encuentran un importe.
     casillas_encontradas: dict[str, str] = {}
 
     # Recorremos todas las páginas del PDF.
     for page in doc:
-        # words: (x0, y0, x1, y1, text, block_no, line_no, word_no)
+        # get_text("words") devuelve una especie de mini-tabla:
+        # (x0, y0, x1, y1, text, block_no, line_no, word_no)
         words = page.get_text("words")
 
         valores = []   # candidatos a importes
@@ -54,21 +61,22 @@ def extraer_casillas(pdf_bytes: bytes, y_tol: float = 2.5) -> pd.DataFrame:
                 valores.append((x0, y0, x1, y1, t))
                 continue
 
-            # 2) ¿Tiene pinta de casilla de 5 dígitos en nuestro rango?
+            # 2) ¿Tiene pinta de casilla de 5 dígitos dentro del rango?
             if re.fullmatch(r"\d{5}", t):
                 n = int(t)
                 if CASILLA_INICIO <= n <= CASILLA_FIN:
                     casillas.append((x0, y0, x1, y1, t))
 
-        # Si en la página no hay casillas o no hay importes, a otra cosa.
+        # Si en la página no hay ni casillas ni importes, pasamos.
         if not casillas or not valores:
             continue
 
         # Ordenamos los importes por altura vertical (centro Y).
+        # Ayuda a que el emparejamiento sea menos random.
         valores.sort(key=lambda w: (w[1] + w[3]) / 2)
 
-        # Emparejamos cada casilla con el importe "más razonable"
-        # (alineado en vertical y a la derecha).
+        # Emparejamos cada casilla con el importe "más razonable":
+        # alineado en vertical y a la derecha.
         for x0, y0, x1, y1, cod in casillas:
             y_c = (y0 + y1) / 2  # centro vertical de la casilla
 
@@ -79,7 +87,7 @@ def extraer_casillas(pdf_bytes: bytes, y_tol: float = 2.5) -> pd.DataFrame:
                 vy_c = (vy0 + vy1) / 2
                 dy = abs(vy_c - y_c)
 
-                # Si verticalmente están muy lejos, descartamos.
+                # Si verticalmente están demasiado lejos, fuera.
                 if dy > y_tol:
                     continue
 
@@ -89,7 +97,7 @@ def extraer_casillas(pdf_bytes: bytes, y_tol: float = 2.5) -> pd.DataFrame:
                     continue
 
                 # Distancia euclídea, porque si podemos meter un hypot,
-                # lo metemos (también cortesía de StackOverflow).
+                # lo metemos. Matemáticas + postureo.
                 dist = math.hypot(dx, dy)
 
                 if mejor_dist is None or dist < mejor_dist:
@@ -108,7 +116,7 @@ def extraer_casillas(pdf_bytes: bytes, y_tol: float = 2.5) -> pd.DataFrame:
         filas.append(
             {
                 "Casilla": c,
-                # Si la casilla no tiene importe, devolvemos cadena vacía.
+                # Si la casilla no tiene importe, dejamos cadena vacía.
                 "Valor": casillas_encontradas.get(c, ""),
             }
         )
@@ -116,12 +124,16 @@ def extraer_casillas(pdf_bytes: bytes, y_tol: float = 2.5) -> pd.DataFrame:
     return pd.DataFrame(filas)
 
 
+# --------------------------------------------
+# UTILIDAD: STRING EU -> FLOAT PYTHON
+# --------------------------------------------
+
 def convertir_a_float_eu(x: str) -> float | None:
     """
     Convierte un string tipo "17.772,60" a float Python 17772.60.
 
     - Si viene vacío, devolvemos None (celda vacía en Excel).
-    - Si pasa algo raro, también devolvemos None (mejor vacío que mal).
+    - Si pasa algo raro, también devolvemos None (mejor vacío que un número mal).
     """
     if not x:
         return None
@@ -132,9 +144,13 @@ def convertir_a_float_eu(x: str) -> float | None:
     try:
         return float(x_norm)
     except Exception:
-        # Si algo se escapa al patrón, no reventamos el mundo por una casilla.
+        # Si algo no cuadra, no tiramos la app por una casilla rebelde.
         return None
 
+
+# --------------------------------------------
+# APP STREAMLIT
+# --------------------------------------------
 
 def main():
     """
@@ -157,40 +173,43 @@ def main():
         st.info("Sube un PDF para empezar.")
         return
 
+    # Nombre original del fichero PDF para usarlo luego en el Excel.
+    pdf_filename = uploaded.name or "modelo200.pdf"
+    base_name, _ = os.path.splitext(pdf_filename)
+    excel_filename = f"{base_name}.xlsx"
+
     pdf_bytes = uploaded.getvalue()
 
     with st.spinner("Procesando PDF..."):
         df = extraer_casillas(pdf_bytes)
 
     # --- Vista en pantalla ---
-    # Aquí mostramos el DataFrame tal cual lo hemos extraído:
-    # valores como strings "17.772,60", que es lo que tú esperas ver.
+    # Mostramos el DataFrame tal cual lo hemos extraído:
+    # valores como strings "17.772,60", igual que se ven en el PDF.
     st.subheader("Vista previa de casillas y valores")
     st.dataframe(df, width="stretch", height=600)
 
     # --- Preparación para Excel ---
-    # Para que Excel tenga la columna B como NÚMERO, hacemos una copia
-    # del DataFrame y en esa copia convertimos "Valor" a float.
+    # Copiamos df para no tocar lo que se ve en pantalla.
     df_excel = df.copy()
+
+    # Convertimos "Valor" (string EU) -> float real
     df_excel["Valor"] = df_excel["Valor"].apply(convertir_a_float_eu)
 
     buffer = BytesIO()
 
-    # Usamos XlsxWriter para poder aplicar formato numérico explícito.
+    # Usamos XlsxWriter para poder aplicar formatos numéricos bonitos.
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        # Volcamos df_excel: aquí "Valor" ya son floats / None
         df_excel.to_excel(writer, index=False, sheet_name="Casillas")
 
-        # Jugamos un poco con el workbook/worksheet para formatear.
         workbook = writer.book
         worksheet = writer.sheets["Casillas"]
 
-        # Formato numérico: miles con punto, decimales con coma.
-        # Excel ya adaptará esto según la configuración regional del usuario.
+        # Formato numérico tipo "##.###,##".
+        # En Excel se escribe como "#.##0,00" y él ya se encarga de los millones.
         formato_num = workbook.add_format({"num_format": "#.##0,00"})
 
-        # Columna B (segunda columna, cero-indexed -> col 1).
-        # Le damos un ancho razonable y el formato numérico.
+        # Columna B (índice 1 porque empieza en 0).
         worksheet.set_column(1, 1, 18, formato_num)
 
     buffer.seek(0)  # rebobinamos para que Streamlit pueda mandar el archivo
@@ -198,7 +217,7 @@ def main():
     st.download_button(
         label="📥 Descargar Excel",
         data=buffer,
-        file_name="modelo200_casillas_01501_02493.xlsx",
+        file_name=excel_filename,
         mime=(
             "application/vnd.openxmlformats-officedocument."
             "spreadsheetml.sheet"
