@@ -2,7 +2,7 @@ import re
 import math
 import os
 from io import BytesIO
-
+from PIL import Image
 import fitz          # PyMuPDF (sí, el import es "fitz", no me preguntes por qué que bastante jodido estoy yo ya...)
 import pandas as pd
 import streamlit as st
@@ -157,6 +157,7 @@ def main():
     Versión Jujo: explica lo justo, sin powerpoint.
     """
 
+   
     st.set_page_config(
         page_title="Extractor Modelo 200",
         page_icon="📄",
@@ -190,6 +191,11 @@ def main():
 
     # --- Sidebar para comerciales ---
     with st.sidebar:
+        try:
+            st.image("assets/cbk-logo.svg", width=160)
+        except:
+            pass
+
         st.markdown("### ¿Qué hace esto?")
         st.write(
             f"- Lee el PDF oficial del Modelo 200.\n"
