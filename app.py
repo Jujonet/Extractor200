@@ -14,7 +14,8 @@ import streamlit as st
 # Rango de casillas que queremos barrer.
 # Como enteros, luego ya los convertimos a "01501", "01502", etc.
 CASILLA_INICIO = 1501
-CASILLA_FIN = 2493
+CASILLA_FIN = 3600 
+# Aunque el PDF sólo tiene hasta 03400 metemos 3600 por si en el futuro se añaden más....
 
 # Patrón para reconocer importes tipo:
 #   1.234,56   -1.234,56   0,00   12.345.678,90
