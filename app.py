@@ -1,6 +1,7 @@
 import re
 import math
 import os
+import base64
 from io import BytesIO
 
 import fitz          # PyMuPDF (sí, el import es "fitz", no me preguntes por qué que bastante jodido estoy yo ya...)
@@ -21,6 +22,16 @@ CASILLA_FIN = 2600       # En el PDF que manejo solo está hasta la 2493 pero me
 #   1.234,56   -1.234,56   0,00   12.345.678,90
 # Si el Modelo 200 cambia, venimos aquí a renegociar con Hacienda.
 PATRON_IMPORTE = re.compile(r"-?\d{1,3}(?:\.\d{3})*,\d{2}$")
+
+def logo_svg(path: str, width: int = 160) -> str:
+    """
+    Devuelve un <img> HTML con un SVG embebido en base64.
+    Traducido: logo vectorial que no se ve como el culo al escalarlo.
+    """
+    with open(path, "rb") as f:
+        svg_bytes = f.read()
+    b64 = base64.b64encode(svg_bytes).decode("utf-8")
+    return f'<img src="data:image/svg+xml;base64,{b64}" width="{width}">'
 
 
 # --------------------------------------------
@@ -191,11 +202,19 @@ def main():
 
     # --- Sidebar para comerciales ---
     with st.sidebar:
+        # Logo corporativo en SVG, pero bien hecho, no la mierda de PNG anterior
         try:
-            st.image("static/cbnk-logo.png", width=160)
-        except:
+            html_logo = logo_svg("static/cbnk-logo.svg", width=160)
+            st.markdown(html_logo, unsafe_allow_html=True)
+        except Exception:
             pass
 
+    st.markdown("### ¿Qué hace esto?")
+    st.write(
+        f"- Lee el PDF oficial del Modelo 200.\n"
+        f"- Busca los importes de las casillas {rango_texto}.\n"
+        "- Genera un Excel listo para copiar/pegar en tu hoja de trabajo."
+    )
         st.markdown("### ¿Qué hace esto?")
         st.write(
             f"- Lee el PDF oficial del Modelo 200.\n"
