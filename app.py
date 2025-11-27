@@ -3,23 +3,23 @@ import math
 import os
 from io import BytesIO
 
-import fitz  # PyMuPDF (sí, el import es "fitz", porque alguien lo decidió así)
+import fitz          # PyMuPDF (sí, el import es "fitz", no me preguntes por qué que bastante jodido estoy yo ya...)
 import pandas as pd
 import streamlit as st
 
+
 # --------------------------------------------
-# CONFIGURACIÓN DEL EXPERIMENTO
+# CONFIGURACIÓN DEL INVENTO
 # --------------------------------------------
 
 # Rango de casillas que queremos barrer.
 # Como enteros, luego ya los convertimos a "01501", "01502", etc.
-CASILLA_INICIO = 1501
-CASILLA_FIN = 3600 
-# Aunque el PDF sólo tiene hasta 03400 metemos 3600 por si en el futuro se añaden más....
+CASILLA_INICIO = 1000    #En el PDF que manejo arranca en la 1501 pero le metemos la 1000 no vaya a ser el demonio....
+CASILLA_FIN = 2600    # En el PDF que manejo solo está hasta la 2493 pero me metemos hasta 2600 para estar preparados para el futuro
 
 # Patrón para reconocer importes tipo:
 #   1.234,56   -1.234,56   0,00   12.345.678,90
-# Si el Modelo 200 cambia, venimos aquí y renegociamos con Hacienda.
+# Si el Modelo 200 cambia, venimos aquí a renegociar con Hacienda.
 PATRON_IMPORTE = re.compile(r"-?\d{1,3}(?:\.\d{3})*,\d{2}$")
 
 
@@ -35,11 +35,11 @@ def extraer_casillas(pdf_bytes: bytes, y_tol: float = 2.5) -> pd.DataFrame:
 
     pdf_bytes: contenido del PDF en bruto.
     y_tol: tolerancia vertical para decidir si casilla e importe están alineados.
-           Si lo subes mucho empezará a emparejar números que no tocan.
+           Si lo subes mucho empezará a emparejar cosas que no tocan.
     """
 
     # Abrimos el PDF desde bytes.
-    # Esto lo vi en StackOverflow; entra en categoría "funciona → no se toca".
+    # Esto lo vi en StackOverflow y como funciona, entra en la categoría "no se toca".
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
 
     # Aquí guardaremos solo las casillas que SÍ encuentren un importe.
@@ -95,7 +95,7 @@ def extraer_casillas(pdf_bytes: bytes, y_tol: float = 2.5) -> pd.DataFrame:
                     continue
 
                 # Distancia euclídea, porque si podemos meter un hypot,
-                # lo metemos (matemáticas + ego).
+                # lo metemos. Matemáticas + ego.
                 dist = math.hypot(dx, dy)
 
                 if mejor_dist is None or dist < mejor_dist:
@@ -148,49 +148,99 @@ def str_eu_a_float(x: str):
 
 
 # --------------------------------------------
-# APP STREAMLIT
+# APP STREAMLIT (INTERFAZ JUJO + CBNK CORPORATE)
 # --------------------------------------------
 
 def main():
-    st.set_page_config(page_title="Extractor Modelo 200", layout="wide")
+    """
+    Interfaz principal de la app Streamlit.
+    Versión Jujo: explica lo justo, sin powerpoint.
+    """
 
-    st.title("Extractor Modelo 200 – Casillas 01501–02493")
-    st.write(
-        "Sube un PDF del Modelo 200. "
-        "Se buscan importes para las casillas 01501–02493. "
-        "Si una casilla no tiene importe visible en el PDF, se deja en blanco."
+    st.set_page_config(
+        page_title="Extractor Modelo 200",
+        page_icon="📄",
+        layout="wide",
     )
 
-    uploaded = st.file_uploader("PDF del Modelo 200", type=["pdf"])
+    # CSS para esconder menú y footer de Streamlit y dejarlo más "corporativo"
+    HIDE_STREAMLIT_STYLE = """
+        <style>
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: visible;}
+        </style>
+    """
+    st.markdown(HIDE_STREAMLIT_STYLE, unsafe_allow_html=True)
+
+    # --- Cabecera limpia ---
+    st.markdown(
+        """
+        <h1 style="margin-bottom:0.2rem;">Extractor Modelo 200</h1>
+        <p style="color:#666; margin-top:0;">
+        Demo interna · Relleno automático de casillas 01000–02600 a partir del PDF del impuesto. Aunque no existan esas casillas las intenta bajar
+        </p>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # --- Sidebar para comerciales ---
+    with st.sidebar:
+        st.markdown("### ¿Qué hace esto?")
+        st.write(
+            "- Lee el PDF oficial del Modelo 200.\n"
+            "- Busca los importes de las casillas 01000–02600.\n"
+            "- Genera un Excel listo para copiar/pegar en tu hoja de trabajo."
+        )
+
+        st.markdown("### Cómo usarlo")
+        st.write(
+            "1.Coge cada PDF del Modelo 200 que te paso el cliente (sin proteger).\n"
+            "2. Súbelo aquí.\n"
+            "3. Revisa que las casillas clave tengan el importe correcto.\n"
+            "4. Descarga el Excel."
+        )
+
+        st.markdown("---")
+        st.markdown(
+            "<small>Versión de prueba de concepto. "
+            "Es una prueba de concepto. No me hago responsable de nada.</small>",
+            unsafe_allow_html=True,
+        )
+
+    # --- Subida de fichero ---
+    uploaded = st.file_uploader("📎 Sube el PDF del Modelo 200", type=["pdf"])
 
     if not uploaded:
-        st.info("Sube un PDF para empezar.")
+        st.info("Sube un PDF para empezar. Idealmente el PDF exportado directamente de la Sede.")
         return
 
-    # Nombre del fichero PDF para usarlo como base del .xlsx
+    # Capturo nombre del fichero PDF para usarlo como base del .xlsx
     pdf_filename = uploaded.name or "modelo200.pdf"
     base_name, _ = os.path.splitext(pdf_filename)
     excel_filename = f"{base_name}.xlsx"
 
     pdf_bytes = uploaded.getvalue()
 
-    with st.spinner("Procesando PDF..."):
+    with st.spinner("Procesando PDF…"):
         df = extraer_casillas(pdf_bytes)
 
-    # --- Vista en pantalla (tal cual texto del PDF) ---
+    st.success("PDF procesado. Revisa las casillas antes de descargar el Excel no vaya a ser el demonio....")
+
+    # --- Vista previa en pantalla ---
     st.subheader("Vista previa de casillas y valores")
-    st.dataframe(df, width="stretch", height=600)
+    st.dataframe(df, use_container_width=True, height=600)
 
     # --- Generación del Excel ---
-    # Aquí pasamos de "modo pandas" a "modo yo controlo": escribimos la hoja
-    # a mano con XlsxWriter para asegurarnos de que el formato se aplica.
-
     buffer = BytesIO()
 
+    # Aquí pasamos de "modo pandas" a "modo yo controlo":
+    # escribimos la hoja a mano con XlsxWriter para asegurarnos de que
+    # el formato numérico se aplica bien.
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
         workbook = writer.book
 
-        # Creamos la hoja nosotros mismos (no usamos df.to_excel)
+        # Creamos la hoja nosotros mismos (no usamos df.to_excel).
         worksheet = workbook.add_worksheet("Casillas")
         writer.sheets["Casillas"] = worksheet
 
@@ -224,11 +274,12 @@ def main():
                     worksheet.write_blank(i, 1, None)
 
         # Ajustamos anchos de columnas
-        worksheet.set_column(0, 0, 8)          # Casilla
-        worksheet.set_column(1, 1, 18)         # Valor (formato ya aplicado por write_number)
+        worksheet.set_column(0, 0, 8)   # Casilla
+        worksheet.set_column(1, 1, 18)  # Valor
 
     buffer.seek(0)
 
+    # Botón de descarga
     st.download_button(
         label="📥 Descargar Excel",
         data=buffer,
@@ -237,6 +288,15 @@ def main():
             "application/vnd.openxmlformats-officedocument."
             "spreadsheetml.sheet"
         ),
+    )
+
+    # Pie de página minimalista
+    st.markdown(
+        "<div style='color:#999; font-size:0.75rem; margin-top:1rem;'>"
+        "Generado automáticamente a partir del PDF del Modelo 200. "
+        "Validar siempre los importes clave antes de enviar la declaración."
+        "</div>",
+        unsafe_allow_html=True,
     )
 
 
