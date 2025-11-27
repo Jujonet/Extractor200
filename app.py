@@ -192,7 +192,7 @@ def main():
     # --- Sidebar para comerciales ---
     with st.sidebar:
         try:
-            st.image("assets/cbnk-logo.png", width=160)
+            st.image("static/cbnk-logo.png", width=160)
         except:
             pass
 
