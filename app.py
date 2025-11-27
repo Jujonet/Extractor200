@@ -209,12 +209,7 @@ def main():
         except Exception:
             pass
 
-    st.markdown("### ¿Qué hace esto?")
-    st.write(
-        f"- Lee el PDF oficial del Modelo 200.\n"
-        f"- Busca los importes de las casillas {rango_texto}.\n"
-        "- Genera un Excel listo para copiar/pegar en tu hoja de trabajo."
-    )
+   
         st.markdown("### ¿Qué hace esto?")
         st.write(
             f"- Lee el PDF oficial del Modelo 200.\n"
