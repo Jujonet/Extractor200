@@ -2,7 +2,7 @@ import re
 import math
 import os
 from io import BytesIO
-from PIL import Image
+
 import fitz          # PyMuPDF (sí, el import es "fitz", no me preguntes por qué que bastante jodido estoy yo ya...)
 import pandas as pd
 import streamlit as st
@@ -192,7 +192,7 @@ def main():
     # --- Sidebar para comerciales ---
     with st.sidebar:
         try:
-            st.image("assets/cbk-logo.png", width=160)
+            st.image("assets/cbnk-logo.png", width=160)
         except:
             pass
 
