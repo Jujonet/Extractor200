@@ -46,7 +46,7 @@ def extraer_casillas(pdf_bytes: bytes, y_tol: float = 2.5) -> pd.DataFrame:
 
     pdf_bytes: contenido del PDF en bruto.
     y_tol: tolerancia vertical para decidir si casilla e importe están alineados.
-           Si lo subes mucho empezará a emparejar cosas que no tocan.
+           Si lo subo mucho empezará a emparejar cosas que no tocan y la liamos.
     """
 
     # Abrimos el PDF desde bytes.
@@ -105,8 +105,11 @@ def extraer_casillas(pdf_bytes: bytes, y_tol: float = 2.5) -> pd.DataFrame:
                 if dx < -2:
                     continue
 
-                # Distancia euclídea, porque si podemos meter un hypot,
-                # lo metemos. Matemáticas + ego.
+        # Distancia euclídea: básicamente mide lo cerca que está el importe
+        # de la casilla en la página. Podría usar algo más simple, pero ya que 
+        # existe math.hypot() y queda de ingeniero friki que te cagas, lo uso.
+        # Preciso, limpio y además sube el ego técnico.
+                
                 dist = math.hypot(dx, dy)
 
                 if mejor_dist is None or dist < mejor_dist:
@@ -136,13 +139,40 @@ def extraer_casillas(pdf_bytes: bytes, y_tol: float = 2.5) -> pd.DataFrame:
 # --------------------------------------------
 # UTILIDAD: STRING EU -> FLOAT PYTHON
 # --------------------------------------------
+#
+# Esta función existe por una razón muy simple:
+#
+# El PDF trae los números en “formato español”, es decir:
+#   - miles con puntos   →  1.234.567
+#   - decimales con coma →  89,45
+#
+# Python, en cambio, habla anglosajon:
+#   - miles sin separador → 1234567
+#   - decimales con punto → 89.45
+#
+# Si intento convertir directamente “1.234,56” con float(), Python
+# me mandaba al carallo (“ValueError”) porque no lo entiende.
+#
+# Así que:
+#   1) quitamos los puntos de miles
+#   2) cambiamos la coma por punto
+#   3) convertimos a float
+#   4) Rezamos
+#
+# Ejemplos:
+#   "17.772,60" → "17772.60" → 17772.60
+#   "0,00"      → "0.00"     → 0.0
+#   ""          → None       (celda vacía en Excel)
+#
+# Si algo viene roto o raro, devuelvo None para no estrellarme....
+#
 
 def str_eu_a_float(x: str):
     """
     "17.772,60" -> 17772.60 (float).
     ""          -> None (para dejar celda en blanco).
 
-    Si algo se rompe, devolvemos None y ya.
+    Si algo se rompe, devolvemos None y arreando....
     """
     if not isinstance(x, str):
         return None
@@ -154,18 +184,19 @@ def str_eu_a_float(x: str):
     try:
         return float(t)
     except Exception:
-        # Si llega algo rarísimo, mejor lo dejamos como texto luego.
+        # Si llega algo rarísimo, mejor lo dejamos como texto y luego ya si eso.
         return None
 
 
 # --------------------------------------------
-# APP STREAMLIT (INTERFAZ JUJO + CBNK CORPORATE)
+# APP STREAMLIT (INTERFAZ JUJO + CBNK CORPORATE) 
+# AQUI ME GUSTÉ A MÍ MISMO
 # --------------------------------------------
 
 def main():
     """
     Interfaz principal de la app Streamlit.
-    Versión Jujo: explica lo justo, sin powerpoint.
+    Versión Jujo: explica lo justo, que no hace falta más...
     """
 
    
@@ -175,7 +206,7 @@ def main():
         layout="wide",
     )
 
-    # CSS para esconder menú y footer de Streamlit y dejarlo más "corporativo"
+    # CSS para esconder menú y footer de Streamlit y dejarlo más "chulo"
     HIDE_STREAMLIT_STYLE = """
         <style>
         #MainMenu {visibility: hidden;}
@@ -202,7 +233,7 @@ def main():
 
     # --- Sidebar para comerciales ---
     with st.sidebar:
-        # Logo corporativo en SVG, pero bien hecho, no la mierda de PNG anterior
+        # Logo corporativo en SVG, pero bien hecho, no la mierda de PNG que me amargaba
         try:
             html_logo = logo_svg("static/cbnk-logo.svg", width=160)
             st.markdown(html_logo, unsafe_allow_html=True)
@@ -228,7 +259,7 @@ def main():
         st.markdown("---")
         st.markdown(
             "<small>Versión de prueba de concepto. "
-            "Es una prueba de concepto. No me hago responsable de nada.</small>",
+            "Es una simple prueba de cómo podría ser. No me hago responsable de nada.</small>",
             unsafe_allow_html=True,
         )
 
@@ -236,7 +267,7 @@ def main():
     uploaded = st.file_uploader("📎 Sube el PDF del Modelo 200", type=["pdf"])
 
     if not uploaded:
-        st.info("Sube un PDF para empezar. Idealmente el PDF exportado directamente de la Sede.")
+        st.info("Sube un PDF para empezar. Idealmente el PDF exportado directamente de la AEAT que te dio el cliente.")
         return
 
     # Capturo nombre del fichero PDF para usarlo como base del .xlsx
@@ -258,19 +289,20 @@ def main():
     # --- Generación del Excel ---
     buffer = BytesIO()
 
-    # Aquí pasamos de "modo pandas" a "modo yo controlo":
-    # escribimos la hoja a mano con XlsxWriter para asegurarnos de que
-    # el formato numérico se aplica bien.
+    # Aquí paso de "modo pandas" a "modo yo controlo":
+    # escribo la hoja a mano con XlsxWriter para asegurarme de que
+    # el formato numérico se aplica bien.... Y aún así no queda al 100% pero yo ya paso...
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
         workbook = writer.book
 
-        # Creamos la hoja nosotros mismos (no usamos df.to_excel).
+        # Creo la hoja yo mismo (no uso df.to_excel).
         worksheet = workbook.add_worksheet("Casillas")
         writer.sheets["Casillas"] = worksheet
 
         # Formatos básicos
         formato_header = workbook.add_format({"bold": True})
-        # Formato numérico tipo ##.###,##  → en Excel: "#.##0,00"
+        # Formato numérico tipo ##.###,##  → en Excel: "#.##0,00" 
+        # Pero por alguna p*ta razón excel pasa de mi.... pero no rompe nada....
         formato_num = workbook.add_format({"num_format": "#.##0,00"})
 
         # Cabeceras
@@ -285,10 +317,11 @@ def main():
             # Columna A: siempre texto
             worksheet.write_string(i, 0, casilla)
 
-            # Columna B: intentamos convertir a número y aplicar formato
+            # Columna B: intento convertir a número y aplicar formato
             num = str_eu_a_float(valor_str)
             if num is not None:
                 # Número real con formato ##.###,##
+                # Segundo intento y segundo fracaso
                 worksheet.write_number(i, 1, num, formato_num)
             else:
                 # Si no hay valor o no se puede convertir, escribimos texto o dejamos en blanco
@@ -297,13 +330,13 @@ def main():
                 else:
                     worksheet.write_blank(i, 1, None)
 
-        # Ajustamos anchos de columnas
+        # Ajusto anchos de columnas para que quede bonito....
         worksheet.set_column(0, 0, 8)   # Casilla
         worksheet.set_column(1, 1, 18)  # Valor
 
     buffer.seek(0)
 
-    # Botón de descarga
+    # Botón de descarga con icono chulo 
     st.download_button(
         label="📥 Descargar Excel",
         data=buffer,
@@ -318,7 +351,7 @@ def main():
     st.markdown(
         "<div style='color:#999; font-size:0.75rem; margin-top:1rem;'>"
         "Generado automáticamente a partir del PDF del Modelo 200. "
-        "Validar siempre los importes clave antes de enviar la declaración."
+        "Validar siempre los importes clave antes de usarlo, que hay partes cogidas con alfileres..."
         "</div>",
         unsafe_allow_html=True,
     )
