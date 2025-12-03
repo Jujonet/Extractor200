@@ -15,7 +15,7 @@ import streamlit as st
 
 # Rango de casillas que queremos barrer.
 # Como enteros, luego ya los convertimos a "01000", "01001", etc.
-CASILLA_INICIO = 1000    # En el PDF que manejo arranca en la 1501 pero le metemos la 1000 no vaya a ser el demonio...
+CASILLA_INICIO = 100    # En el PDF que manejo arranca en la 1501 pero le metemos la 1000 no vaya a ser el demonio...
 CASILLA_FIN = 2600       # En el PDF que manejo solo está hasta la 2493 pero metemos hasta 2600 para estar preparados para el futuro
 
 # Patrón para reconocer importes tipo:
