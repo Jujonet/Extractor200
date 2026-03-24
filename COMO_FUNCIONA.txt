@@ -1,0 +1,188 @@
+CÓMO FUNCIONA EL CÓDIGO — EXPLICACIÓN PARA PERSONAS NORMALES
+(con un mínimo de curiosidad técnica pero sin doctorado en informática)
+=======================================================================
+
+
+VISIÓN GENERAL
+--------------
+
+El programa hace básicamente lo mismo que haría un becario muy aplicado:
+abrir el PDF del Modelo 200, buscar todos los códigos de casilla que ve,
+apuntar el número que está justo al lado de cada uno, y meterlo todo en Excel.
+
+La diferencia es que el programa no se queja, no pide café y tarda dos segundos.
+¿Podría ser mejor? Seguro! pero uno tiene sus limitaciones...
+
+
+-----------------------------------------------------------------------
+BLOQUE 1 — CONFIGURACIÓN INICIAL
+-----------------------------------------------------------------------
+
+Al principio del código hay dos constantes:
+
+    CASILLA_INICIO = 100
+    CASILLA_FIN    = 2600
+
+Esto define el rango de casillas que el programa intenta encontrar.
+Se guardan como enteros (100, 101...) pero luego se formatean como texto
+de 5 dígitos ("00100", "00101"...) para que queden igual que en el PDF.
+
+También hay un patrón de búsqueda llamado PATRON_IMPORTE.
+Es una expresión regular (un filtro de texto) que le dice al programa
+cómo reconocer un importe con formato español:
+    - miles separados por punto:    1.234.567
+    - decimales separados por coma: 89,45
+    - puede ser negativo:          -1.234,56
+
+Si ves algo como r"-?\d{1,3}(?:\.\d{3})*,\d{2}$" y te parece chino,
+tranquilo: es solo una forma muy comprimida de escribir esa descripción; yo tampoco
+sabía cómo hacerlo pero lo encontré en Stackoverflow...
+
+
+-----------------------------------------------------------------------
+BLOQUE 2 — LEER EL PDF (función extraer_casillas)
+-----------------------------------------------------------------------
+
+Esta es la función principal. Recibe el PDF en bruto y devuelve una tabla.
+
+PASO 1 — Abrir el PDF
+   Usa PyMuPDF (que se importa como "fitz", nombre heredado de una
+   librería antigua, ya nadie recuerda por qué y ya nadie pregunta).
+   Lo abre directamente desde la memoria, sin guardarlo en disco.
+
+PASO 2 — Recorrer página por página
+   Por cada página llama a get_text("words"), que devuelve una lista
+   de todas las palabras del PDF con sus coordenadas exactas:
+       (x_izquierda, y_arriba, x_derecha, y_abajo, texto)
+
+   Con eso sabe dónde está cada palabra en la página, como si tuviera
+   una cuadrícula invisible encima del PDF.
+
+PASO 3 — Clasificar cada palabra
+   Para cada palabra en la página, el programa pregunta dos cosas:
+
+   a) ¿Es un importe?
+      Aplica el PATRON_IMPORTE. Si encaja ("17.772,60" → sí,
+      "Sociedad Limitada" → no), lo apunta como candidato a valor.
+
+   b) ¿Es un código de casilla?
+      Mira si es exactamente 5 dígitos y está dentro del rango 100–2600.
+      Si cumple, lo apunta como candidato a casilla.
+
+   Al final de cada página tiene dos listas:
+   - casillas: coordenadas + código ("00505", "01234"...)
+   - valores:  coordenadas + importe ("17.772,60", "0,00"...)
+
+PASO 4 — Emparejar casillas con sus importes (la parte delicada)
+   Para cada casilla busca el importe "más cercano y razonable".
+   Dos condiciones tienen que cumplirse:
+
+   a) Alineación vertical: el centro vertical del importe y el de la
+      casilla no pueden diferir más de y_tol=2.5 puntos tipográficos.
+      (Básicamente tienen que estar en la misma línea horizontal.)
+      Si no, se descarta ese candidato. Recuerda que y_tol es parametrizable
+      pero está hardcoded... bestia que es uno....  
+
+   b) A la derecha: el importe tiene que estar a la derecha de la casilla,
+      no a su izquierda ni encima. Lógico: así está maquetado el formulario.
+
+   Entre todos los candidatos que pasan estos dos filtros, se queda con
+   el que tenga menor distancia euclídea (raíz de la suma de cuadrados
+   de las distancias horizontal y vertical). Suena complicado pero es
+   solo "el más cercano en diagonal". Lo que habría hecho cualquiera...
+
+PASO 5 — Construir la tabla final
+   Una vez procesadas todas las páginas, construye un DataFrame (tabla)
+   con TODAS las casillas del rango, de la 00100 a la 02600.
+   - Las que encontró: llevan su importe.
+   - Las que no aparecían en el PDF: se quedan con cadena vacía "".
+
+   Esto es importante: el programa nunca falla por no encontrar una casilla.
+   Simplemente la deja en blanco. No explota. No protesta. Así que si ves
+   que te devuelve todo blanco, planteate si el cliente te lo ha pasado escaneado,
+   o te ha pasado sólo la primera y última hoja. Sí; eso pasa...
+
+
+-----------------------------------------------------------------------
+BLOQUE 3 — CONVERTIR IMPORTES A NÚMERO REAL (función str_eu_a_float)
+-----------------------------------------------------------------------
+
+El PDF trae los números en formato español ("17.772,60").
+Python y Excel en modo anglosajón esperan ("17772.60").
+
+Esta función hace la conversión en tres pasos:
+    1. Quita los puntos de miles:   "17.772,60" → "17772,60"
+    2. Cambia la coma por punto:    "17772,60"  → "17772.60"
+    3. Convierte a float:           "17772.60"  → 17772.60
+
+Si recibe una cadena vacía o algo que no tiene pinta de número,
+devuelve None, que es la forma que tiene Python de decir "aquí no hay nada".
+Eso luego se traduce en celda en blanco en el Excel.
+Supongo que hay formas mejores -y más rápidas de hacerlo- pero no la encontré....
+
+
+-----------------------------------------------------------------------
+BLOQUE 4 — LA INTERFAZ WEB (función main con Streamlit)
+-----------------------------------------------------------------------
+
+Streamlit es una librería que convierte un script Python en una app web
+sin tener que escribir HTML ni JavaScript. Parece magia negra, pero funciona...
+
+La interfaz tiene tres partes:
+
+1. CABECERA: título y descripción. Generada con HTML embebido directamente
+   en Python porque Streamlit permite eso (con unsafe_allow_html=True,
+   que suena peligroso pero aquí solo sirve para poner texto bonito).
+
+2. SIDEBAR (columna lateral izquierda):
+   - Logo en SVG (vectorial, no se pixela al escalar ;-) ).
+   - Explicación breve de qué hace la app.
+   - Instrucciones de uso en 4 pasos.
+   - Aviso de que es un PoC y nadie se hace responsable de nada.
+
+3. ÁREA PRINCIPAL:
+   - Botón de subida del PDF.
+   - Spinner mientras procesa ("Procesando PDF…").
+   - Vista previa de la tabla en pantalla (los primeros N registros).
+   - Botón de descarga del Excel.
+
+El Excel se genera con XlsxWriter (en lugar del método automático de pandas)
+para tener control manual sobre el formato de los números. El resultado
+no es perfecto porque el locale de Excel del destinatario puede ignorar
+el formato, pero en español funciona y al menos los números están como números 
+reales y no como texto.....
+
+
+-----------------------------------------------------------------------
+RESUMEN EN UNA FRASE
+-----------------------------------------------------------------------
+
+El código abre el PDF, analiza la posición de cada palabra en la página,
+empareja códigos de casilla con sus importes por proximidad geométrica,
+convierte los números al formato que entiende Python, y lo vuelca en Excel.
+
+Todo lo demás son comentarios, CSS y logos.
+
+
+-----------------------------------------------------------------------
+SI ALGO FALLA — PRIMEROS SITIOS DONDE MIRAR
+-----------------------------------------------------------------------
+
+- Casillas vacías que deberían tener valor
+  → Subir y_tol de 2.5 a 5.0 o más. El importe y la casilla
+    no estaban suficientemente alineados para el umbral actual (aunque a mi
+    con los ejemplos que me pasaron me funcionaba bien).
+
+- No extrae nada de un PDF
+  → Probablemente el PDF es una imagen escaneada, no tiene texto nativo.
+    PyMuPDF no hace OCR. El PDF tiene que ser el original de la AEAT; 
+    No me planteo hacerlo con OCR...
+
+- Excel con los números como texto
+  → Problema de locale. Los números están bien (son floats reales),
+    pero Excel del destinatario interpreta el formato de otra manera.
+    Solución manual: seleccionar columna B → Formato → Número.
+
+=======================================================================
+Fin del documento. Si has llegado hasta aquí, enhorabuena y me debes un café
+=======================================================================
